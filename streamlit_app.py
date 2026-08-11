@@ -1,3 +1,4 @@
+import math
 import re
 import time
 from datetime import date
@@ -21,14 +22,43 @@ UBER_LIMIT_SECONDS = 20 * 60
 WALK_SEARCH_RADIUS_M = 2200
 CAR_SEARCH_RADIUS_M = 45000
 UBER_SEARCH_RADIUS_M = 20000
-TARGET_PRICE_LEVEL = 4  # Google's $$$$ tier, roughly €50+ per person
-FALLBACK_PRICE_LEVEL = 3  # used only if too few $$$$ options exist nearby
 MIN_RATING_PREMIUM = 4.4
 MIN_REVIEWS_PREMIUM = 30
+MIN_RATING_CASUAL = 4.2
+MIN_REVIEWS_CASUAL = 25
 MAX_REVIEWS_CAP = 6000  # above this, volume usually means high-turnover/tourist crowd, not exclusivity
 MIN_RESULTS_SHOWN = 7
 MAX_RESULTS_SHOWN = 9
 CANDIDATE_BATCH_SIZE = 20
+
+MEAL_PROFILES = {
+    "dinner": {
+        "label": "dinner",
+        "primary_tiers": (4,),  # Google's $$$$ tier, roughly €50+ per person
+        "acceptable_tiers": (4, 3),  # falls back to $$$ if too few $$$$ options exist nearby
+        "min_rating": MIN_RATING_PREMIUM,
+        "min_reviews": MIN_REVIEWS_PREMIUM,
+        "off_tier_penalty": 0.75,
+        "primary_bonus": 1.05,
+        "review_cap": MAX_REVIEWS_CAP,
+    },
+    "lunch": {
+        "label": "lunch",
+        "primary_tiers": (1, 2),  # casual: € or €€
+        "acceptable_tiers": (1, 2, 3),
+        "min_rating": MIN_RATING_CASUAL,
+        "min_reviews": MIN_REVIEWS_CASUAL,
+        "off_tier_penalty": 0.7,
+        "primary_bonus": 1.05,
+        "review_cap": None,  # near a landmark/beach naturally means more foot traffic and reviews
+    },
+}
+
+POI_TYPES = ["tourist_attraction", "park"]
+POI_SEARCH_RADIUS_M = 3000
+MAX_POIS = 15
+POI_NEAR_THRESHOLD_M = 1000  # ~12 min walk: "near" a nice walk, beach, or landmark
+POI_PROXIMITY_BONUS = 1.15
 
 TAG_KEYWORDS = [
     ("Steak", ["steak", "ribeye", "sirloin", "chateaubriand", "tomahawk"]),
@@ -186,6 +216,47 @@ def nearby_search_restaurants(lat, lng, radius, api_key):
     return all_results
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def nearby_points_of_interest(lat, lng, api_key):
+    deduped = {}
+    for place_type in POI_TYPES:
+        resp = requests.get(
+            "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+            params={"location": f"{lat},{lng}", "radius": POI_SEARCH_RADIUS_M, "type": place_type, "key": api_key},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("status") not in ("OK", "ZERO_RESULTS"):
+            continue
+        for r in data.get("results", []):
+            place_id = r.get("place_id")
+            loc = r.get("geometry", {}).get("location")
+            if not place_id or not loc or place_id in deduped:
+                continue
+            deduped[place_id] = {"name": r.get("name"), "lat": loc["lat"], "lng": loc["lng"], "rating": r.get("rating") or 0}
+
+    pois = sorted(deduped.values(), key=lambda p: p["rating"], reverse=True)
+    return pois[:MAX_POIS]
+
+
+def haversine_m(lat1, lng1, lat2, lng2):
+    r = 6371000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def nearest_poi(lat, lng, pois):
+    best, best_dist = None, None
+    for poi in pois:
+        dist = haversine_m(lat, lng, poi["lat"], poi["lng"])
+        if best_dist is None or dist < best_dist:
+            best, best_dist = poi, dist
+    return best, best_dist
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_place_details(place_id, api_key):
     resp = requests.get(
@@ -224,14 +295,17 @@ def find_reservation_link(website_url):
     return None
 
 
-def filter_and_score(raw_results):
+def filter_and_score(raw_results, meal="dinner", pois=None):
     """Ranks every viable (non-chain, operational) restaurant best-first.
 
-    Premium-tier, well-rated, non-tourist-volume places are scored highest, but nothing
-    is hard-excluded here -- that way there's always a full ranked list to draw from, so
-    the caller can keep pulling further down the list until it has enough results instead
-    of ever coming up empty just because a town lacks $$$$ options.
+    Places matching the meal's target price tier, well-rated, non-tourist-volume ones
+    are scored highest -- and for lunch, ones near a nice walk/beach/landmark get a boost
+    too -- but nothing is hard-excluded here, so there's always a full ranked list to draw
+    from and the caller can keep pulling further down it instead of ever coming up empty
+    just because a town lacks options matching the ideal profile.
     """
+    profile = MEAL_PROFILES[meal]
+
     deduped = {}
     for r in raw_results:
         place_id = r.get("place_id")
@@ -245,24 +319,27 @@ def filter_and_score(raw_results):
         deduped[place_id] = r
     candidates = list(deduped.values())
 
-    def is_premium_tier(r):
-        return r.get("price_level") == TARGET_PRICE_LEVEL
-
-    def is_acceptable_tier(r):
-        return r.get("price_level") in (TARGET_PRICE_LEVEL, FALLBACK_PRICE_LEVEL)
-
     for r in candidates:
         rating = r.get("rating") or 0
         reviews = r.get("user_ratings_total") or 0
         score = rating * _log10(1 + reviews)
-        if is_premium_tier(r):
-            score *= 1.05
-        elif not is_acceptable_tier(r):
-            score *= 0.75
-        if rating < MIN_RATING_PREMIUM or reviews < MIN_REVIEWS_PREMIUM:
+        if r.get("price_level") in profile["primary_tiers"]:
+            score *= profile["primary_bonus"]
+        elif r.get("price_level") not in profile["acceptable_tiers"]:
+            score *= profile["off_tier_penalty"]
+        if rating < profile["min_rating"] or reviews < profile["min_reviews"]:
             score *= 0.6
-        if reviews > MAX_REVIEWS_CAP:
+        if profile["review_cap"] is not None and reviews > profile["review_cap"]:
             score *= 0.5
+
+        if pois:
+            loc = r.get("geometry", {}).get("location")
+            if loc:
+                poi, dist = nearest_poi(loc["lat"], loc["lng"], pois)
+                if poi and dist <= POI_NEAR_THRESHOLD_M:
+                    score *= POI_PROXIMITY_BONUS
+                    r["_nearby_poi"] = {"name": poi["name"], "distance_m": dist}
+
         r["_score"] = score
 
     return sorted(candidates, key=lambda r: r["_score"], reverse=True)
@@ -386,6 +463,11 @@ def render_card(details, travel):
         if tags:
             st.caption("Known for: " + " · ".join(tags))
 
+        nearby_poi = details.get("nearby_poi")
+        if nearby_poi:
+            walk_min = max(1, round(nearby_poi["distance_m"] / 80))
+            st.caption(f"🏖️ {walk_min} min walk to {nearby_poi['name']}")
+
         st.write(build_blurb(details))
 
         link_col1, link_col2 = st.columns(2)
@@ -451,6 +533,13 @@ def main():
 
     accommodation = location_picker(api_key)
 
+    meal_choice = st.radio(
+        "What are you looking for?",
+        ["Dinner (upscale, €50pp+)", "Lunch (casual, near sights)"],
+        horizontal=True,
+    )
+    meal = "lunch" if meal_choice.startswith("Lunch") else "dinner"
+
     col1, col2 = st.columns(2)
     start_date = col1.date_input("Arrival date", value=date.today(), min_value=date.today())
     end_date = col2.date_input("Departure date", value=date.today(), min_value=date.today())
@@ -481,8 +570,10 @@ def main():
             place = accommodation
             weekdays = collect_weekdays(start_date, end_date)
 
+            pois = nearby_points_of_interest(place["lat"], place["lng"], api_key) if meal == "lunch" else None
+
             raw_results = nearby_search_restaurants(place["lat"], place["lng"], radius, api_key)
-            filtered = filter_and_score(raw_results)
+            filtered = filter_and_score(raw_results, meal, pois)
 
             if not filtered:
                 st.warning(
@@ -502,6 +593,7 @@ def main():
                 for cand in batch:
                     details = get_place_details(cand["place_id"], api_key)
                     if details:
+                        details["nearby_poi"] = cand.get("_nearby_poi")
                         paired.append({"details": details, "candidate_score": cand["_score"]})
 
                 with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label, drive_limit_seconds)
@@ -540,7 +632,7 @@ def main():
     else:
         mode_note = "walking distance"
     st.caption(
-        f"{len(final_list)} great option{'s' if len(final_list) != 1 else ''} near "
+        f"{len(final_list)} great {MEAL_PROFILES[meal]['label']} option{'s' if len(final_list) != 1 else ''} near "
         f"{place['formatted_address']} ({mode_note})."
     )
     for r in final_list:

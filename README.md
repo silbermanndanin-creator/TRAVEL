@@ -1,29 +1,29 @@
 # Trip Bites 🍽️
 
-A simple, no-install web app for finding well-reviewed, high-end restaurants near wherever
-you're staying — with one tap to see it on Google Maps and one tap to book or visit its
-website.
+A simple, no-install web app for finding well-reviewed restaurants near wherever you're
+staying — with one tap to see it on Google Maps and one tap to book or visit its website.
 
-**How it works:** you type in your hotel/accommodation and your travel dates, tick a box
-if you have a car, and it shows a shortlist of top-tier restaurants nearby, each with:
+**How it works:** you type in your hotel/accommodation and your travel dates, choose
+**Dinner** or **Lunch**, tick a box if you have a car, and it shows a shortlist of
+restaurants nearby, each with:
 
 - Star rating and number of reviews
-- Price level (shown as €€€€)
+- Price level (shown as € / €€ / €€€ / €€€€)
 - "Known for" tags mined from reviews and Google's editorial summary — e.g. Steak, Wine,
   Seafood, Tasting Menu, Truffle — so you know what each place specialises in at a glance
+- For lunch, how close it is to a nice walk, park, beach, or landmark
 - Distance and walking (or driving) time from your accommodation
 - A "View on Google Maps" button
 - A "Website / Book" button (or "Reserve on Google Maps" if the restaurant has no own site)
 
-Restaurants are targeted at the **€50+ per person / €€€€ tier** (Google's highest price
-level), and are only shown if they also clear a high quality bar (4.4★+ with a healthy
-number of reviews). Chain fast-food restaurants, buffets, and "tourist menu" spots are
-automatically excluded, and places with an unusually huge review count (a common sign of
-high-turnover tourist-trap volume rather than an exclusive, well-loved spot) are filtered
-out too. If a town doesn't have enough €€€€ options nearby, it gently relaxes to include
-solid €€€ places rather than showing nothing. If you tick **"we have a car"**, the search
-widens to include anywhere up to a 50-minute drive away; otherwise it sticks to a
-comfortable walk.
+**Dinner mode** targets the **€50+ per person / €€€€ tier** (Google's highest price
+level), and is only shown if it also clears a high quality bar (4.4★+ with a healthy
+number of reviews) — gently relaxing to €€€ if a town doesn't have enough €€€€ options.
+**Lunch mode** flips that: it targets casual **€/€€** places (4.2★+), and prioritises ones
+within about a 12-minute walk of a park, tourist attraction, or beach, so it's easy to pair
+a bite with sightseeing. Both modes automatically exclude chain fast-food restaurants,
+buffets, and "tourist menu" spots. If you tick **"we have a car"**, the search widens to
+include anywhere up to a 50-minute drive away; otherwise it sticks to a comfortable walk.
 
 There's no backend server and nothing to install — it's a single web page that runs
 entirely in the browser, so it works great on a phone.
@@ -165,6 +165,22 @@ clearly labelled **🚕 (Uber/taxi)** instead of a plain car icon, so it's obvio
 needed rather than your own vehicle. If "We have a car" is ticked (with or without Uber),
 the wider 50-minute car search takes over and results just show the plain car icon, since
 driving yourself covers everything a shorter Uber trip would.
+
+### Dinner vs. Lunch
+
+A radio toggle right under the location box switches between two different profiles:
+
+- **Dinner (upscale, €50pp+)** — the default. Targets fine dining ($$$$/€€€€), 4.4★+.
+- **Lunch (casual, near sights)** — targets casual, inexpensive-to-moderate places
+  (€/€€), 4.2★+, and gives a ranking boost to anywhere within roughly a 12-minute walk of
+  a park, tourist attraction, or beach (found via a separate Google Places lookup around
+  your accommodation). When a restaurant qualifies, its card shows a line like
+  "🏖️ 8 min walk to [landmark]" so you can pair lunch with a walk, a swim, or sightseeing.
+  Lunch mode also doesn't penalise busy/high-review-count places the way dinner mode does
+  — a great casual spot next to a beach is *supposed* to be popular.
+
+Both modes still exclude chains, buffets, and "tourist menu" spots, and both fall back
+gracefully (never leaving you empty-handed) exactly as described below.
 
 ### At least 7 results, whenever there's anything to show
 
