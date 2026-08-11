@@ -166,6 +166,17 @@ needed rather than your own vehicle. If "We have a car" is ticked (with or witho
 the wider 50-minute car search takes over and results just show the plain car icon, since
 driving yourself covers everything a shorter Uber trip would.
 
+### At least 7 results, whenever there's anything to show
+
+The app tries hard not to leave you with a thin or empty list. Restaurants aren't hard-cut
+by price tier or rating — a $$$$-and-4.4★+ place always ranks first, but $$$/casual/less-
+reviewed options are still ranked (just lower) rather than thrown away, and if the top
+batch doesn't clear 7 valid, open, reachable results, the app automatically pulls in more
+candidates from further down the list until it does (or runs out of nearby restaurants
+entirely). In a genuinely small town with only a handful of restaurants total, you'll see
+however many actually exist — the app can't invent restaurants that aren't there, but it
+will always show the most it possibly can rather than giving up early.
+
 ### Running it locally instead
 
 ```bash
