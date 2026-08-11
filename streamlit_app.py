@@ -1,8 +1,10 @@
 import time
 from datetime import date
+from functools import partial
 
 import requests
 import streamlit as st
+from streamlit_searchbox import st_searchbox
 
 EXCLUDE_KEYWORDS = [
     "mcdonald", "burger king", "kfc", "starbucks", "subway", "pizza hut",
@@ -355,45 +357,33 @@ def render_card(details, travel):
         link_col2.link_button(book_label, book_url, use_container_width=True)
 
 
+def search_google_places(searchterm, api_key):
+    text = (searchterm or "").strip()
+    if not text:
+        return []
+    predictions = autocomplete_predictions(text, api_key)
+    options = [(p["description"], ("place", p["place_id"])) for p in predictions]
+    if not options:
+        options.append((f'Use "{text}" exactly as typed (unverified)', ("raw", text)))
+    return options
+
+
 def location_picker(api_key):
-    location_text = st.text_input(
-        "Where are you staying?", placeholder="Hotel name, address, or city",
-        key="location_text",
+    selected = st_searchbox(
+        partial(search_google_places, api_key=api_key),
+        placeholder="Hotel name, address, or city",
+        label="Where are you staying?",
+        key="location_searchbox",
     )
 
-    if location_text.strip():
-        if location_text != st.session_state.get("_looked_up_text"):
-            with st.spinner("Looking up matching places on Google Maps…"):
-                predictions = autocomplete_predictions(location_text.strip(), api_key)
-            st.session_state["_looked_up_text"] = location_text
-            st.session_state["location_predictions"] = predictions
-            st.session_state["accommodation"] = None
-    else:
-        st.session_state["_looked_up_text"] = ""
-        st.session_state["location_predictions"] = []
-        st.session_state["accommodation"] = None
-
-    predictions = st.session_state.get("location_predictions", [])
-
-    if predictions:
-        options = [p["description"] for p in predictions]
-        choice = st.radio(
-            "Select your exact location (matched against Google Maps):",
-            options, index=None, key="location_choice",
-        )
-        if choice:
-            selected = next(p for p in predictions if p["description"] == choice)
-            current = st.session_state.get("accommodation")
-            if not current or current.get("place_id") != selected["place_id"]:
-                with st.spinner("Confirming location…"):
-                    st.session_state["accommodation"] = get_place_location(selected["place_id"], api_key)
-    elif location_text.strip():
-        st.warning("No Google Maps matches found for that text.")
-        if st.button("Search anyway using exactly what I typed"):
-            with st.spinner("Looking up that address…"):
-                st.session_state["accommodation"] = geocode_location(location_text.strip(), api_key)
-            if not st.session_state.get("accommodation"):
-                st.error("Couldn't find that location at all. Try a different spelling.")
+    if selected and selected != st.session_state.get("_last_location_selection"):
+        st.session_state["_last_location_selection"] = selected
+        kind, value = selected
+        with st.spinner("Confirming location…"):
+            accommodation = get_place_location(value, api_key) if kind == "place" else geocode_location(value, api_key)
+        st.session_state["accommodation"] = accommodation
+        if not accommodation:
+            st.error("Couldn't find that location. Try a different spelling.")
 
     accommodation = st.session_state.get("accommodation")
     if accommodation:
