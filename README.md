@@ -1,22 +1,29 @@
 # Trip Bites 🍽️
 
-A simple, no-install web app for finding well-reviewed, locally-loved restaurants near
-wherever you're staying — with one tap to see it on Google Maps and one tap to book or
-visit its website.
+A simple, no-install web app for finding well-reviewed, high-end restaurants near wherever
+you're staying — with one tap to see it on Google Maps and one tap to book or visit its
+website.
 
 **How it works:** you type in your hotel/accommodation and your travel dates, tick a box
-if you have a car, and it shows a shortlist of highly-rated restaurants nearby, each with:
+if you have a car, and it shows a shortlist of top-tier restaurants nearby, each with:
 
 - Star rating and number of reviews
-- Price level (€ / €€ / €€€)
+- Price level (shown as €€€€)
+- "Known for" tags mined from reviews and Google's editorial summary — e.g. Steak, Wine,
+  Seafood, Tasting Menu, Truffle — so you know what each place specialises in at a glance
 - Distance and walking (or driving) time from your accommodation
 - A "View on Google Maps" button
 - A "Website / Book" button (or "Reserve on Google Maps" if the restaurant has no own site)
 
-Restaurants are ranked using their real Google rating and review count, filtered to a high
-quality bar (4.3★+ with plenty of reviews where possible), and chain fast-food restaurants
-are automatically excluded. If you tick **"we have a car"**, the search widens to include
-anywhere up to a 50-minute drive away; otherwise it sticks to a comfortable walk.
+Restaurants are targeted at the **€50+ per person / €€€€ tier** (Google's highest price
+level), and are only shown if they also clear a high quality bar (4.4★+ with a healthy
+number of reviews). Chain fast-food restaurants, buffets, and "tourist menu" spots are
+automatically excluded, and places with an unusually huge review count (a common sign of
+high-turnover tourist-trap volume rather than an exclusive, well-loved spot) are filtered
+out too. If a town doesn't have enough €€€€ options nearby, it gently relaxes to include
+solid €€€ places rather than showing nothing. If you tick **"we have a car"**, the search
+widens to include anywhere up to a 50-minute drive away; otherwise it sticks to a
+comfortable walk.
 
 There's no backend server and nothing to install — it's a single web page that runs
 entirely in the browser, so it works great on a phone.
@@ -119,6 +126,10 @@ streamlit_app.py
    set **API restrictions** to those three APIs.
 5. Deploy. Streamlit gives you a public URL you can bookmark on your phone.
 
+Once the secret is set, **every visitor goes straight to the search form** — nobody ever
+has to paste an API key, including on a different phone or browser. That's the main
+advantage of this version over the static one for sharing with family.
+
 ### Running it locally instead
 
 ```bash
@@ -139,6 +150,12 @@ browser instead (handy for a quick local test, but it only lasts that session).
   reservation option automatically when the restaurant supports it (e.g. via OpenTable
   or The Fork); otherwise you may need to call ahead.
 - **Distances/times** are Google's typical estimates, not live traffic.
+- **"Known for" tags** are mined from Google's editorial summary and review text using
+  keyword matching (steak, seafood, wine, tasting menu, etc.) — they're a helpful hint,
+  not a verified menu, so a restaurant might be great at something the tags don't catch.
+- **Price/tourist filtering** relies on Google's own price-level and review data, which
+  isn't perfect everywhere — very new or lesser-reviewed gems can be missed, and
+  occasionally a place slips through despite the filters.
 - Everything (your API key, search inputs) stays local in your browser — the app has no
   server and doesn't store or transmit your data anywhere else.
 

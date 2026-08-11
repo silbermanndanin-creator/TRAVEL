@@ -178,6 +178,13 @@ input[type="date"]:focus {
 }
 .stars { color: #d9a12b; font-weight: 700; }
 
+.tags-row {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
 .blurb {
   margin: 0.6rem 0 0.9rem;
   color: var(--ink);
