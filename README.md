@@ -141,6 +141,18 @@ double-check it's correct before it searches for restaurants nearby. If Google h
 matches for what you typed, the dropdown offers a "use exactly as typed (unverified)"
 option as a fallback.
 
+### Direct booking links
+
+The **"Book a Table"** button tries to skip straight to a restaurant's actual reservation
+page instead of just its homepage. It checks the restaurant's website for a link to a
+known booking platform (OpenTable, Resy, TheFork, Quandoo, SevenRooms, Tock, and others)
+or a page whose link looks like a reservations/booking page, and uses that if found. If
+nothing booking-related is found, it falls back to the plain website, then to the
+restaurant's Google Maps page (which shows its own "Reserve a table" option automatically
+when the restaurant supports it). This is a best-effort scan of the homepage's links, not
+a guarantee — some restaurant websites won't have a detectable link (e.g. reservations
+handled only by phone, or a booking widget that JavaScript loads in without a plain link).
+
 ### Running it locally instead
 
 ```bash

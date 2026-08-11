@@ -1,6 +1,8 @@
+import re
 import time
 from datetime import date
 from functools import partial
+from urllib.parse import urljoin
 
 import requests
 import streamlit as st
@@ -44,6 +46,12 @@ TAG_KEYWORDS = [
     ("Traditional / Local Cuisine", ["traditional", "authentic", "local specialt", "family recipe"]),
 ]
 MAX_TAGS_SHOWN = 4
+
+RESERVATION_HOST_HINTS = [
+    "opentable.", "resy.com", "thefork.", "quandoo.", "sevenrooms.",
+    "exploretock.", "zenchef.", "formitable.", "bookatable.", "reserve.google.com",
+]
+RESERVATION_PATH_HINTS = ["reserv", "book-a-table", "/book", "booking"]
 
 DETAIL_FIELDS = ",".join([
     "name", "rating", "user_ratings_total", "price_level", "formatted_address",
@@ -187,6 +195,31 @@ def get_place_details(place_id, api_key):
     if data.get("status") != "OK":
         return None
     return data.get("result")
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def find_reservation_link(website_url):
+    try:
+        resp = requests.get(
+            website_url, timeout=3,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; TripBitesBot/1.0)"},
+        )
+        html = resp.text[:200000]
+    except requests.RequestException:
+        return None
+
+    hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, re.IGNORECASE)
+
+    def resolve(href):
+        return href if href.lower().startswith("http") else urljoin(website_url, href)
+
+    for href in hrefs:
+        if any(h in href.lower() for h in RESERVATION_HOST_HINTS):
+            return resolve(href)
+    for href in hrefs:
+        if any(p in href.lower() for p in RESERVATION_PATH_HINTS):
+            return resolve(href)
+    return None
 
 
 def filter_and_score(raw_results):
@@ -352,8 +385,15 @@ def render_card(details, travel):
             + requests.utils.quote(f"{details['name']} {details.get('formatted_address', '')}")
         )
         link_col1.link_button("📍 View on Google Maps", maps_url, use_container_width=True)
-        book_url = details.get("website") or details.get("url")
-        book_label = "🌐 Website / Book" if details.get("website") else "📅 Reserve on Google Maps"
+
+        reservation_url = details.get("reservation_url")
+        website = details.get("website")
+        if reservation_url:
+            book_url, book_label = reservation_url, "📅 Book a Table"
+        elif website:
+            book_url, book_label = website, "🌐 Website / Book"
+        else:
+            book_url, book_label = maps_url, "📅 Reserve on Google Maps"
         link_col2.link_button(book_label, book_url, use_container_width=True)
 
 
@@ -460,6 +500,12 @@ def main():
         except RuntimeError as e:
             st.error(f"Something went wrong fetching restaurants: {e}")
             return
+
+    with st.spinner("Finding direct booking links…"):
+        for r in final_list:
+            website = r["details"].get("website")
+            if website:
+                r["details"]["reservation_url"] = find_reservation_link(website)
 
     mode_note = "walking + driving" if has_car else "walking distance"
     st.caption(
