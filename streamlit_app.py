@@ -26,9 +26,9 @@ FALLBACK_PRICE_LEVEL = 3  # used only if too few $$$$ options exist nearby
 MIN_RATING_PREMIUM = 4.4
 MIN_REVIEWS_PREMIUM = 30
 MAX_REVIEWS_CAP = 6000  # above this, volume usually means high-turnover/tourist crowd, not exclusivity
-MIN_RATING_RELAXED = 4.0
-MIN_REVIEWS_RELAXED = 20
+MIN_RESULTS_SHOWN = 7
 MAX_RESULTS_SHOWN = 9
+CANDIDATE_BATCH_SIZE = 20
 
 TAG_KEYWORDS = [
     ("Steak", ["steak", "ribeye", "sirloin", "chateaubriand", "tomahawk"]),
@@ -166,7 +166,7 @@ def nearby_search_restaurants(lat, lng, radius, api_key):
     params = {"location": f"{lat},{lng}", "radius": radius, "type": "restaurant", "key": api_key}
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 
-    for page in range(2):
+    for page in range(3):
         resp = requests.get(url, params=params, timeout=15)
         data = resp.json()
         status = data.get("status")
@@ -178,7 +178,7 @@ def nearby_search_restaurants(lat, lng, radius, api_key):
             raise RuntimeError(f"Places search failed: {status}")
         all_results.extend(data.get("results", []))
         token = data.get("next_page_token")
-        if not token or page == 1:
+        if not token or page == 2:
             break
         time.sleep(2)
         params = {"pagetoken": token, "key": api_key}
@@ -225,6 +225,13 @@ def find_reservation_link(website_url):
 
 
 def filter_and_score(raw_results):
+    """Ranks every viable (non-chain, operational) restaurant best-first.
+
+    Premium-tier, well-rated, non-tourist-volume places are scored highest, but nothing
+    is hard-excluded here -- that way there's always a full ranked list to draw from, so
+    the caller can keep pulling further down the list until it has enough results instead
+    of ever coming up empty just because a town lacks $$$$ options.
+    """
     deduped = {}
     for r in raw_results:
         place_id = r.get("place_id")
@@ -238,29 +245,27 @@ def filter_and_score(raw_results):
         deduped[place_id] = r
     candidates = list(deduped.values())
 
-    def meets_quality_bar(r, min_rating, min_reviews):
-        review_count = r.get("user_ratings_total") or 0
-        return (r.get("rating") or 0) >= min_rating and min_reviews <= review_count <= MAX_REVIEWS_CAP
-
     def is_premium_tier(r):
         return r.get("price_level") == TARGET_PRICE_LEVEL
 
     def is_acceptable_tier(r):
         return r.get("price_level") in (TARGET_PRICE_LEVEL, FALLBACK_PRICE_LEVEL)
 
-    pool = [r for r in candidates if is_premium_tier(r) and meets_quality_bar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM)]
-    if len(pool) < 5:
-        pool = [r for r in candidates if is_acceptable_tier(r) and meets_quality_bar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM)]
-    if not pool:
-        pool = [r for r in candidates if is_acceptable_tier(r) and meets_quality_bar(r, MIN_RATING_RELAXED, MIN_REVIEWS_RELAXED)]
-
-    for r in pool:
-        score = (r.get("rating") or 0) * _log10(1 + (r.get("user_ratings_total") or 0))
+    for r in candidates:
+        rating = r.get("rating") or 0
+        reviews = r.get("user_ratings_total") or 0
+        score = rating * _log10(1 + reviews)
         if is_premium_tier(r):
             score *= 1.05
+        elif not is_acceptable_tier(r):
+            score *= 0.75
+        if rating < MIN_RATING_PREMIUM or reviews < MIN_REVIEWS_PREMIUM:
+            score *= 0.6
+        if reviews > MAX_REVIEWS_CAP:
+            score *= 0.5
         r["_score"] = score
 
-    return sorted(pool, key=lambda r: r["_score"], reverse=True)
+    return sorted(candidates, key=lambda r: r["_score"], reverse=True)
 
 
 def _log10(x):
@@ -487,26 +492,32 @@ def main():
                 )
                 return
 
-            top_candidates = filtered[:20]
-            paired = []
-            for cand in top_candidates:
-                details = get_place_details(cand["place_id"], api_key)
-                if details:
-                    paired.append({"details": details, "candidate_score": cand["_score"]})
+            final_list = []
+            offset = 0
+            while len(final_list) < MIN_RESULTS_SHOWN and offset < len(filtered):
+                batch = filtered[offset:offset + CANDIDATE_BATCH_SIZE]
+                offset += CANDIDATE_BATCH_SIZE
 
-            with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label, drive_limit_seconds)
+                paired = []
+                for cand in batch:
+                    details = get_place_details(cand["place_id"], api_key)
+                    if details:
+                        paired.append({"details": details, "candidate_score": cand["_score"]})
 
-            final_list = [
-                r for r in with_distances
-                if r["travel"] is not None and is_open_during_stay(r["details"], weekdays)
-            ]
+                with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label, drive_limit_seconds)
+                final_list.extend(
+                    r for r in with_distances
+                    if r["travel"] is not None and is_open_during_stay(r["details"], weekdays)
+                )
+
             final_list.sort(key=lambda r: r["score"], reverse=True)
             final_list = final_list[:MAX_RESULTS_SHOWN]
 
             if not final_list:
                 st.warning(
                     "No great matches found nearby. Try widening the search by ticking "
-                    "\"we have a car\", or double-check the location."
+                    "\"we have a car\" or \"willing to take an Uber/taxi\", or double-check "
+                    "the location."
                 )
                 return
 
