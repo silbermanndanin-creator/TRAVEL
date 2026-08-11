@@ -1,0 +1,97 @@
+# Trip Bites 🍽️
+
+A simple, no-install web app for finding well-reviewed, locally-loved restaurants near
+wherever you're staying — with one tap to see it on Google Maps and one tap to book or
+visit its website.
+
+**How it works:** you type in your hotel/accommodation and your travel dates, tick a box
+if you have a car, and it shows a shortlist of highly-rated restaurants nearby, each with:
+
+- Star rating and number of reviews
+- Price level (€ / €€ / €€€)
+- Distance and walking (or driving) time from your accommodation
+- A "View on Google Maps" button
+- A "Website / Book" button (or "Reserve on Google Maps" if the restaurant has no own site)
+
+Restaurants are ranked using their real Google rating and review count, filtered to a high
+quality bar (4.3★+ with plenty of reviews where possible), and chain fast-food restaurants
+are automatically excluded. If you tick **"we have a car"**, the search widens to include
+anywhere up to a 50-minute drive away; otherwise it sticks to a comfortable walk.
+
+There's no backend server and nothing to install — it's a single web page that runs
+entirely in the browser, so it works great on a phone.
+
+## One-time setup (5 minutes)
+
+The app needs a free Google Maps API key to look up restaurants, ratings, and distances.
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/) and sign in with
+   any Google account.
+2. Create a new project (top-left project dropdown → "New Project"). Any name is fine,
+   e.g. "Trip Bites".
+3. Go to **APIs & Services → Library** and enable these three APIs:
+   - **Maps JavaScript API**
+   - **Places API**
+   - **Distance Matrix API**
+4. Go to **APIs & Services → Credentials → Create Credentials → API key**. Copy the key
+   it gives you.
+5. (Recommended) Click on the new key to restrict it:
+   - Under **Application restrictions**, choose **Websites** and add the web address
+     you'll open the app from (e.g. `https://yourusername.github.io/*` if using GitHub
+     Pages — see below).
+   - Under **API restrictions**, restrict it to the three APIs above.
+6. Open the app and paste the key into the "Google Maps API key" box when prompted. It's
+   saved in your browser only (never sent anywhere else) so you only do this once per
+   device.
+
+**Cost:** Google Maps Platform includes a recurring free usage tier every month, which
+comfortably covers casual personal use like this. Check current pricing at
+[mapsplatform.google.com/pricing](https://mapsplatform.google.com/pricing/) before
+relying on it for a long trip, and consider setting a budget alert in the Cloud Console
+for peace of mind.
+
+## Using it
+
+1. Open `index.html` (or the hosted link — see deployment below).
+2. Paste your API key in once (first time only).
+3. Type your hotel name, address, or the city you're staying in, and pick the matching
+   suggestion from the dropdown.
+4. Choose your arrival and departure dates.
+5. Tick "We have a car" if you'd like restaurants up to 50 minutes' drive away included;
+   leave it unticked to only see places within an easy walk.
+6. Tap **Find Restaurants**.
+7. Tap a restaurant's **View on Google Maps** to navigate there, or **Website / Book** to
+   go straight to its booking page or site.
+
+## Deploying so it's easy to open on a phone (optional)
+
+The simplest option is **GitHub Pages**, which gives you a free public link:
+
+1. Push this repository to GitHub (already done if you're reading this from the repo).
+2. In the repository, go to **Settings → Pages**.
+3. Under "Build and deployment", set **Source** to "Deploy from a branch", pick the
+   branch this code is on, and folder `/ (root)`.
+4. Save. GitHub will give you a URL like `https://yourusername.github.io/TRAVEL/` — open
+   that on any phone or laptop.
+5. If you restricted your API key to specific websites (step 5 above), add this exact
+   URL (with a trailing `/*`) to the allowed list.
+
+Bookmark the link on your phone's home screen for one-tap access while travelling.
+
+## Good to know / limitations
+
+- **Opening hours** are checked against each restaurant's usual weekly schedule, not
+  public holidays or one-off closures — always confirm before making a special trip.
+- **Booking links**: not every restaurant has online booking. Where there's no dedicated
+  website, the "Reserve on Google Maps" button opens its Google Maps page, which shows a
+  reservation option automatically when the restaurant supports it (e.g. via OpenTable
+  or The Fork); otherwise you may need to call ahead.
+- **Distances/times** are Google's typical estimates, not live traffic.
+- Everything (your API key, search inputs) stays local in your browser — the app has no
+  server and doesn't store or transmit your data anywhere else.
+
+## Files
+
+- `index.html` — page structure and the search form
+- `style.css` — styling (large, high-contrast, mobile-friendly)
+- `app.js` — all the search, filtering, ranking, and rendering logic
