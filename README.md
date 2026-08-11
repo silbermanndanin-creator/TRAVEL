@@ -21,7 +21,21 @@ anywhere up to a 50-minute drive away; otherwise it sticks to a comfortable walk
 There's no backend server and nothing to install — it's a single web page that runs
 entirely in the browser, so it works great on a phone.
 
-## One-time setup (5 minutes)
+## Two ways to run this
+
+There are two independent versions of the same app in this repo — pick one:
+
+| | Static web app | Streamlit app |
+|---|---|---|
+| Main file | `index.html` | **`streamlit_app.py`** |
+| Runs on | Any web host / your own browser | [Streamlit Community Cloud](https://streamlit.io/cloud) (free) |
+| API key entry | Pasted once in the browser, saved to that browser only | Stored server-side as a Streamlit "secret" — never exposed to visitors |
+| Best for | GitHub Pages, opening the file directly | One-click free hosting, no GitHub Pages setup |
+
+Instructions for the static app are below. For the **Streamlit version**, jump to
+[Running the Streamlit app](#running-the-streamlit-app).
+
+## One-time setup (5 minutes) — static web app
 
 The app needs a free Google Maps API key to look up restaurants, ratings, and distances.
 
@@ -78,6 +92,44 @@ The simplest option is **GitHub Pages**, which gives you a free public link:
 
 Bookmark the link on your phone's home screen for one-tap access while travelling.
 
+## Running the Streamlit app
+
+The Streamlit version is the **same app logic rebuilt in Python**, so it can be deployed
+for free on [Streamlit Community Cloud](https://share.streamlit.io) without touching
+GitHub Pages. Its main file is:
+
+```
+streamlit_app.py
+```
+
+### Deploy for free (recommended)
+
+1. Push this repo to GitHub (already done).
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+3. Click **New app**, pick this repository and branch, and set the main file path to
+   `streamlit_app.py`.
+4. Before (or after) deploying, open the app's **Settings → Secrets** and paste:
+   ```toml
+   GOOGLE_MAPS_API_KEY = "your-key-here"
+   ```
+   Use the same key from the [setup steps above](#one-time-setup-5-minutes--static-web-app),
+   but enable **Geocoding API**, **Places API**, and **Distance Matrix API** (not Maps
+   JavaScript API — the Streamlit version doesn't need it). Since the key is only ever
+   used server-side here, leave its **Application restrictions** set to "None" and only
+   set **API restrictions** to those three APIs.
+5. Deploy. Streamlit gives you a public URL you can bookmark on your phone.
+
+### Running it locally instead
+
+```bash
+pip install -r requirements.txt
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # then edit in your key
+streamlit run streamlit_app.py
+```
+
+If you skip the secrets file, the app will ask you to paste an API key directly in the
+browser instead (handy for a quick local test, but it only lasts that session).
+
 ## Good to know / limitations
 
 - **Opening hours** are checked against each restaurant's usual weekly schedule, not
@@ -92,6 +144,13 @@ Bookmark the link on your phone's home screen for one-tap access while travellin
 
 ## Files
 
+Static web app:
 - `index.html` — page structure and the search form
 - `style.css` — styling (large, high-contrast, mobile-friendly)
 - `app.js` — all the search, filtering, ranking, and rendering logic
+
+Streamlit app:
+- `streamlit_app.py` — main file: search form, Google Places/Distance Matrix calls,
+  filtering, ranking, and rendering
+- `requirements.txt` — Python dependencies
+- `.streamlit/secrets.toml.example` — template for your API key secret
