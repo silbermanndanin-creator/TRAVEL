@@ -85,6 +85,44 @@ def api_key_gate():
     st.stop()
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def autocomplete_predictions(input_text, api_key):
+    resp = requests.get(
+        "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+        params={"input": input_text, "key": api_key},
+        timeout=15,
+    )
+    data = resp.json()
+    if data.get("status") not in ("OK", "ZERO_RESULTS"):
+        return []
+    return [
+        {"description": p["description"], "place_id": p["place_id"]}
+        for p in data.get("predictions", [])
+    ]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_place_location(place_id, api_key):
+    resp = requests.get(
+        "https://maps.googleapis.com/maps/api/place/details/json",
+        params={"place_id": place_id, "fields": "name,formatted_address,geometry,url", "key": api_key},
+        timeout=15,
+    )
+    data = resp.json()
+    if data.get("status") != "OK":
+        return None
+    result = data["result"]
+    loc = result["geometry"]["location"]
+    return {
+        "place_id": place_id,
+        "name": result.get("name"),
+        "lat": loc["lat"],
+        "lng": loc["lng"],
+        "formatted_address": result.get("formatted_address", result.get("name", "")),
+        "maps_url": result.get("url"),
+    }
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def geocode_location(address, api_key):
     resp = requests.get(
@@ -97,7 +135,17 @@ def geocode_location(address, api_key):
         return None
     result = data["results"][0]
     loc = result["geometry"]["location"]
-    return {"lat": loc["lat"], "lng": loc["lng"], "formatted_address": result["formatted_address"]}
+    return {
+        "place_id": result.get("place_id"),
+        "name": result["formatted_address"],
+        "lat": loc["lat"],
+        "lng": loc["lng"],
+        "formatted_address": result["formatted_address"],
+        "maps_url": (
+            f"https://www.google.com/maps/place/?q=place_id:{result['place_id']}"
+            if result.get("place_id") else None
+        ),
+    }
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -307,27 +355,74 @@ def render_card(details, travel):
         link_col2.link_button(book_label, book_url, use_container_width=True)
 
 
+def location_picker(api_key):
+    location_text = st.text_input(
+        "Where are you staying?", placeholder="Hotel name, address, or city",
+        key="location_text",
+    )
+
+    if location_text.strip():
+        if location_text != st.session_state.get("_looked_up_text"):
+            with st.spinner("Looking up matching places on Google Maps…"):
+                predictions = autocomplete_predictions(location_text.strip(), api_key)
+            st.session_state["_looked_up_text"] = location_text
+            st.session_state["location_predictions"] = predictions
+            st.session_state["accommodation"] = None
+    else:
+        st.session_state["_looked_up_text"] = ""
+        st.session_state["location_predictions"] = []
+        st.session_state["accommodation"] = None
+
+    predictions = st.session_state.get("location_predictions", [])
+
+    if predictions:
+        options = [p["description"] for p in predictions]
+        choice = st.radio(
+            "Select your exact location (matched against Google Maps):",
+            options, index=None, key="location_choice",
+        )
+        if choice:
+            selected = next(p for p in predictions if p["description"] == choice)
+            current = st.session_state.get("accommodation")
+            if not current or current.get("place_id") != selected["place_id"]:
+                with st.spinner("Confirming location…"):
+                    st.session_state["accommodation"] = get_place_location(selected["place_id"], api_key)
+    elif location_text.strip():
+        st.warning("No Google Maps matches found for that text.")
+        if st.button("Search anyway using exactly what I typed"):
+            with st.spinner("Looking up that address…"):
+                st.session_state["accommodation"] = geocode_location(location_text.strip(), api_key)
+            if not st.session_state.get("accommodation"):
+                st.error("Couldn't find that location at all. Try a different spelling.")
+
+    accommodation = st.session_state.get("accommodation")
+    if accommodation:
+        st.success(f"📍 Location set: {accommodation['formatted_address']}")
+        if accommodation.get("maps_url"):
+            st.link_button("View on Google Maps", accommodation["maps_url"])
+
+    return accommodation
+
+
 def main():
     api_key = api_key_gate()
 
     st.title("🍽️ Trip Bites")
     st.caption("Find great, locally-loved restaurants wherever you're staying.")
 
-    with st.form("search_form"):
-        location_text = st.text_input(
-            "Where are you staying?", placeholder="Hotel name, address, or city"
-        )
-        col1, col2 = st.columns(2)
-        start_date = col1.date_input("Arrival date", value=date.today(), min_value=date.today())
-        end_date = col2.date_input("Departure date", value=date.today(), min_value=date.today())
-        has_car = st.checkbox("We have a car (search up to 50 minutes' drive away)")
-        submitted = st.form_submit_button("Find Restaurants", type="primary", use_container_width=True)
+    accommodation = location_picker(api_key)
+
+    col1, col2 = st.columns(2)
+    start_date = col1.date_input("Arrival date", value=date.today(), min_value=date.today())
+    end_date = col2.date_input("Departure date", value=date.today(), min_value=date.today())
+    has_car = st.checkbox("We have a car (search up to 50 minutes' drive away)")
+    submitted = st.button("Find Restaurants", type="primary", use_container_width=True)
 
     if not submitted:
         return
 
-    if not location_text.strip():
-        st.error("Please enter where you're staying.")
+    if not accommodation:
+        st.error("Please select your accommodation from the Google Maps suggestions above first.")
         return
     if end_date < start_date:
         st.error("Departure date can't be before arrival date.")
@@ -335,11 +430,7 @@ def main():
 
     with st.spinner("Researching local favourites…"):
         try:
-            place = geocode_location(location_text.strip(), api_key)
-            if not place:
-                st.error("Couldn't find that location. Try a more specific address or hotel name.")
-                return
-
+            place = accommodation
             weekdays = collect_weekdays(start_date, end_date)
             radius = CAR_SEARCH_RADIUS_M if has_car else WALK_SEARCH_RADIUS_M
 
