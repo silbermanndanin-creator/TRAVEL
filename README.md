@@ -130,6 +130,17 @@ Once the secret is set, **every visitor goes straight to the search form** — n
 has to paste an API key, including on a different phone or browser. That's the main
 advantage of this version over the static one for sharing with family.
 
+### Verified location lookup
+
+Typing an accommodation name/address doesn't just get geocoded blindly — as soon as you
+type something and press Enter or click away, the app looks it up against **Google Maps'
+own Places database** and shows you a list of real matches to pick from (e.g. distinguishing
+"Hotel Le Meurice, Paris" from a same-named spa or street). Once you pick one, it shows the
+confirmed address plus a **"View on Google Maps"** button linking straight to that exact
+place, so you can double-check it's the right one before searching for restaurants nearby.
+If Google finds no matches for what you typed, you can still force a search using the raw
+text as a fallback.
+
 ### Running it locally instead
 
 ```bash
