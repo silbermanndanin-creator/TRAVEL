@@ -3,21 +3,44 @@
 
 const STORAGE_KEY = "tripbites_gmaps_key";
 
-const CHAIN_BLACKLIST = [
+const EXCLUDE_KEYWORDS = [
   "mcdonald", "burger king", "kfc", "starbucks", "subway", "pizza hut",
   "domino", "taco bell", "dunkin", "costa coffee", "greggs", "five guys",
-  "nando", "wendy", "papa john", "wagamama express"
+  "nando", "wendy", "papa john", "wagamama express",
+  "buffet", "all you can eat", "all-you-can-eat", "tourist menu", "set menu tourist",
 ];
 
 const WALK_LIMIT_SECONDS = 25 * 60; // 25 min walk cap
 const DRIVE_LIMIT_SECONDS = 50 * 60; // 50 min drive cap, per user request
 const WALK_SEARCH_RADIUS_M = 2200;
 const CAR_SEARCH_RADIUS_M = 45000;
-const MIN_RATING_STRICT = 4.3;
-const MIN_REVIEWS_STRICT = 50;
+const TARGET_PRICE_LEVEL = 4; // Google's $$$$ tier, roughly €50+ per person
+const FALLBACK_PRICE_LEVEL = 3; // used only if too few $$$$ options exist nearby
+const MIN_RATING_PREMIUM = 4.4;
+const MIN_REVIEWS_PREMIUM = 30;
+const MAX_REVIEWS_CAP = 6000; // above this, volume usually means high-turnover/tourist crowd, not exclusivity
 const MIN_RATING_RELAXED = 4.0;
 const MIN_REVIEWS_RELAXED = 20;
 const MAX_RESULTS_SHOWN = 9;
+
+const TAG_KEYWORDS = [
+  ["Steak", ["steak", "ribeye", "sirloin", "chateaubriand", "tomahawk"]],
+  ["Seafood", ["seafood", "oyster", "lobster", "prawn", "shellfish", "crab", " fish "]],
+  ["Sushi", ["sushi", "sashimi", "omakase"]],
+  ["Pizza", ["pizza", "pizzeria"]],
+  ["Pasta", ["pasta", "risotto", "gnocchi"]],
+  ["Tapas / Small Plates", ["tapas", "small plates", "sharing plates"]],
+  ["Grill / BBQ", ["grill", "bbq", "barbecue", "chargrill", "charcoal"]],
+  ["Tasting Menu", ["tasting menu", "degustation", "chef's menu", "chef's table"]],
+  ["Wine", ["wine list", "wine pairing", "sommelier", "wine cellar", "extensive wine"]],
+  ["Cocktails", ["cocktail", "mixology", "speakeasy"]],
+  ["Truffle", ["truffle"]],
+  ["Cheese", ["cheese board", "cheese selection", "fromage"]],
+  ["Desserts / Pastry", ["dessert", "pastry", "patisserie", "chocolate"]],
+  ["Vegetarian / Vegan", ["vegetarian", "vegan", "plant-based", "plant based"]],
+  ["Traditional / Local Cuisine", ["traditional", "authentic", "local specialt", "family recipe"]],
+];
+const MAX_TAGS_SHOWN = 4;
 
 let accommodation = null; // { name, address, location: google.maps.LatLng }
 let map; // hidden map instance required by PlacesService
@@ -275,7 +298,7 @@ function getPlaceDetails(placeId) {
         fields: [
           "name", "rating", "user_ratings_total", "price_level",
           "formatted_address", "geometry", "opening_hours", "website",
-          "url", "types", "editorial_summary", "business_status",
+          "url", "types", "editorial_summary", "business_status", "reviews",
         ],
       },
       (place, status) => {
@@ -295,26 +318,49 @@ function filterAndScore(rawResults) {
     if (!r.place_id || deduped.has(r.place_id)) continue;
     if (r.business_status && r.business_status !== "OPERATIONAL") continue;
     const nameLower = (r.name || "").toLowerCase();
-    if (CHAIN_BLACKLIST.some((chain) => nameLower.includes(chain))) continue;
+    if (EXCLUDE_KEYWORDS.some((kw) => nameLower.includes(kw))) continue;
     deduped.set(r.place_id, r);
   }
-  let candidates = Array.from(deduped.values());
+  const candidates = Array.from(deduped.values());
 
-  let strict = candidates.filter(
-    (r) => (r.rating || 0) >= MIN_RATING_STRICT && (r.user_ratings_total || 0) >= MIN_REVIEWS_STRICT
-  );
-  let pool = strict.length >= 5 ? strict : candidates.filter(
-    (r) => (r.rating || 0) >= MIN_RATING_RELAXED && (r.user_ratings_total || 0) >= MIN_REVIEWS_RELAXED
-  );
-  if (pool.length === 0) pool = candidates;
+  const meetsQualityBar = (r, minRating, minReviews) => {
+    const reviewCount = r.user_ratings_total || 0;
+    return (r.rating || 0) >= minRating && reviewCount >= minReviews && reviewCount <= MAX_REVIEWS_CAP;
+  };
+  const isPremiumTier = (r) => r.price_level === TARGET_PRICE_LEVEL;
+  const isAcceptableTier = (r) => r.price_level === TARGET_PRICE_LEVEL || r.price_level === FALLBACK_PRICE_LEVEL;
+
+  let pool = candidates.filter((r) => isPremiumTier(r) && meetsQualityBar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM));
+  if (pool.length < 5) {
+    pool = candidates.filter((r) => isAcceptableTier(r) && meetsQualityBar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM));
+  }
+  if (pool.length === 0) {
+    pool = candidates.filter((r) => isAcceptableTier(r) && meetsQualityBar(r, MIN_RATING_RELAXED, MIN_REVIEWS_RELAXED));
+  }
 
   pool.forEach((r) => {
     let score = (r.rating || 0) * Math.log10((r.user_ratings_total || 0) + 1);
-    if (r.price_level === 4) score *= 0.92; // slight nudge away from top-end fine dining toward "great standard"
+    if (isPremiumTier(r)) score *= 1.05; // favour restaurants that match the $$$$ target exactly
     r._score = score;
   });
 
   return pool.sort((a, b) => b._score - a._score);
+}
+
+// ---------- "Known for" tags ----------
+
+function extractTags(details) {
+  const reviewTexts = (details.reviews || []).map((rev) => rev.text || "").join(" ");
+  const combined = `${details.name || ""} ${details.editorial_summary?.overview || ""} ${reviewTexts}`.toLowerCase();
+
+  const matched = [];
+  for (const [label, triggers] of TAG_KEYWORDS) {
+    if (triggers.some((t) => combined.includes(t))) {
+      matched.push(label);
+      if (matched.length >= MAX_TAGS_SHOWN) break;
+    }
+  }
+  return matched;
 }
 
 // ---------- Distances ----------
@@ -466,6 +512,14 @@ function buildCard(details, travel) {
     ratingRow.appendChild(warn);
   }
 
+  const tags = extractTags(details);
+  let tagsRow = null;
+  if (tags.length > 0) {
+    tagsRow = document.createElement("p");
+    tagsRow.className = "tags-row";
+    tagsRow.textContent = `Known for: ${tags.join(" · ")}`;
+  }
+
   const blurb = document.createElement("p");
   blurb.className = "blurb";
   blurb.textContent = buildBlurb(details);
@@ -492,6 +546,7 @@ function buildCard(details, travel) {
 
   card.appendChild(top);
   card.appendChild(ratingRow);
+  if (tagsRow) card.appendChild(tagsRow);
   card.appendChild(blurb);
   card.appendChild(actions);
 

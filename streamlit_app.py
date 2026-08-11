@@ -4,26 +4,49 @@ from datetime import date
 import requests
 import streamlit as st
 
-CHAIN_BLACKLIST = [
+EXCLUDE_KEYWORDS = [
     "mcdonald", "burger king", "kfc", "starbucks", "subway", "pizza hut",
     "domino", "taco bell", "dunkin", "costa coffee", "greggs", "five guys",
     "nando", "wendy", "papa john", "wagamama express",
+    "buffet", "all you can eat", "all-you-can-eat", "tourist menu", "set menu tourist",
 ]
 
 WALK_LIMIT_SECONDS = 25 * 60
 DRIVE_LIMIT_SECONDS = 50 * 60
 WALK_SEARCH_RADIUS_M = 2200
 CAR_SEARCH_RADIUS_M = 45000
-MIN_RATING_STRICT = 4.3
-MIN_REVIEWS_STRICT = 50
+TARGET_PRICE_LEVEL = 4  # Google's $$$$ tier, roughly €50+ per person
+FALLBACK_PRICE_LEVEL = 3  # used only if too few $$$$ options exist nearby
+MIN_RATING_PREMIUM = 4.4
+MIN_REVIEWS_PREMIUM = 30
+MAX_REVIEWS_CAP = 6000  # above this, volume usually means high-turnover/tourist crowd, not exclusivity
 MIN_RATING_RELAXED = 4.0
 MIN_REVIEWS_RELAXED = 20
 MAX_RESULTS_SHOWN = 9
 
+TAG_KEYWORDS = [
+    ("Steak", ["steak", "ribeye", "sirloin", "chateaubriand", "tomahawk"]),
+    ("Seafood", ["seafood", "oyster", "lobster", "prawn", "shellfish", "crab", " fish "]),
+    ("Sushi", ["sushi", "sashimi", "omakase"]),
+    ("Pizza", ["pizza", "pizzeria"]),
+    ("Pasta", ["pasta", "risotto", "gnocchi"]),
+    ("Tapas / Small Plates", ["tapas", "small plates", "sharing plates"]),
+    ("Grill / BBQ", ["grill", "bbq", "barbecue", "chargrill", "charcoal"]),
+    ("Tasting Menu", ["tasting menu", "degustation", "chef's menu", "chef's table"]),
+    ("Wine", ["wine list", "wine pairing", "sommelier", "wine cellar", "extensive wine"]),
+    ("Cocktails", ["cocktail", "mixology", "speakeasy"]),
+    ("Truffle", ["truffle"]),
+    ("Cheese", ["cheese board", "cheese selection", "fromage"]),
+    ("Desserts / Pastry", ["dessert", "pastry", "patisserie", "chocolate"]),
+    ("Vegetarian / Vegan", ["vegetarian", "vegan", "plant-based", "plant based"]),
+    ("Traditional / Local Cuisine", ["traditional", "authentic", "local specialt", "family recipe"]),
+]
+MAX_TAGS_SHOWN = 4
+
 DETAIL_FIELDS = ",".join([
     "name", "rating", "user_ratings_total", "price_level", "formatted_address",
     "geometry", "opening_hours", "website", "url", "types", "editorial_summary",
-    "business_status",
+    "business_status", "reviews",
 ])
 
 st.set_page_config(page_title="Trip Bites", page_icon="🍽️", layout="centered")
@@ -125,28 +148,31 @@ def filter_and_score(raw_results):
         if r.get("business_status") and r["business_status"] != "OPERATIONAL":
             continue
         name_lower = (r.get("name") or "").lower()
-        if any(chain in name_lower for chain in CHAIN_BLACKLIST):
+        if any(kw in name_lower for kw in EXCLUDE_KEYWORDS):
             continue
         deduped[place_id] = r
     candidates = list(deduped.values())
 
-    strict = [
-        r for r in candidates
-        if (r.get("rating") or 0) >= MIN_RATING_STRICT
-        and (r.get("user_ratings_total") or 0) >= MIN_REVIEWS_STRICT
-    ]
-    pool = strict if len(strict) >= 5 else [
-        r for r in candidates
-        if (r.get("rating") or 0) >= MIN_RATING_RELAXED
-        and (r.get("user_ratings_total") or 0) >= MIN_REVIEWS_RELAXED
-    ]
+    def meets_quality_bar(r, min_rating, min_reviews):
+        review_count = r.get("user_ratings_total") or 0
+        return (r.get("rating") or 0) >= min_rating and min_reviews <= review_count <= MAX_REVIEWS_CAP
+
+    def is_premium_tier(r):
+        return r.get("price_level") == TARGET_PRICE_LEVEL
+
+    def is_acceptable_tier(r):
+        return r.get("price_level") in (TARGET_PRICE_LEVEL, FALLBACK_PRICE_LEVEL)
+
+    pool = [r for r in candidates if is_premium_tier(r) and meets_quality_bar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM)]
+    if len(pool) < 5:
+        pool = [r for r in candidates if is_acceptable_tier(r) and meets_quality_bar(r, MIN_RATING_PREMIUM, MIN_REVIEWS_PREMIUM)]
     if not pool:
-        pool = candidates
+        pool = [r for r in candidates if is_acceptable_tier(r) and meets_quality_bar(r, MIN_RATING_RELAXED, MIN_REVIEWS_RELAXED)]
 
     for r in pool:
         score = (r.get("rating") or 0) * _log10(1 + (r.get("user_ratings_total") or 0))
-        if r.get("price_level") == 4:
-            score *= 0.92
+        if is_premium_tier(r):
+            score *= 1.05
         r["_score"] = score
 
     return sorted(pool, key=lambda r: r["_score"], reverse=True)
@@ -155,6 +181,19 @@ def filter_and_score(raw_results):
 def _log10(x):
     import math
     return math.log10(x) if x > 0 else 0
+
+
+def extract_tags(details):
+    review_texts = " ".join(rev.get("text", "") for rev in details.get("reviews", []))
+    combined = f"{details.get('name', '')} {(details.get('editorial_summary') or {}).get('overview', '')} {review_texts}".lower()
+
+    matched = []
+    for label, triggers in TAG_KEYWORDS:
+        if any(t in combined for t in triggers):
+            matched.append(label)
+            if len(matched) >= MAX_TAGS_SHOWN:
+                break
+    return matched
 
 
 def distance_matrix(origin, destinations, mode, api_key):
@@ -250,6 +289,10 @@ def render_card(details, travel):
         price = "€" * max(1, details.get("price_level", 0)) if details.get("price_level") is not None else ""
         hours_note = "" if details.get("opening_hours", {}).get("periods") else " · ⚠️ confirm hours before visiting"
         st.markdown(f"★ **{rating}** ({reviews:,} reviews)  {price}{hours_note}")
+
+        tags = extract_tags(details)
+        if tags:
+            st.caption("Known for: " + " · ".join(tags))
 
         st.write(build_blurb(details))
 
