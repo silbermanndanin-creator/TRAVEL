@@ -155,13 +155,16 @@ handled only by phone, or a booking widget that JavaScript loads in without a pl
 
 ### No car? Willing to Uber
 
-Alongside **"We have a car"**, there's a second checkbox: **"Willing to take an Uber/taxi"**.
-Either one (or both) widens the search from an easy walk to anywhere up to a 50-minute
-drive away, on the assumption that a rideshare or taxi covers roughly the same ground as
-driving yourself. If you only tick the Uber option (no car), results reached that way are
+There are two independent ways to widen the search beyond an easy walk:
+
+- **"Willing to take an Uber/taxi"** — up to a **20-minute** drive away
+- **"We have a car"** — up to a **50-minute** drive away
+
+Tick either or both. If you tick **only** the Uber option, results reached that way are
 clearly labelled **🚕 (Uber/taxi)** instead of a plain car icon, so it's obvious a ride is
-needed rather than your own vehicle. Ticking both just uses the plain car label, since
-driving yourself is assumed to be the default when you have the option.
+needed rather than your own vehicle. If "We have a car" is ticked (with or without Uber),
+the wider 50-minute car search takes over and results just show the plain car icon, since
+driving yourself covers everything a shorter Uber trip would.
 
 ### Running it locally instead
 

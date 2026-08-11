@@ -17,8 +17,10 @@ EXCLUDE_KEYWORDS = [
 
 WALK_LIMIT_SECONDS = 25 * 60
 DRIVE_LIMIT_SECONDS = 50 * 60
+UBER_LIMIT_SECONDS = 20 * 60
 WALK_SEARCH_RADIUS_M = 2200
 CAR_SEARCH_RADIUS_M = 45000
+UBER_SEARCH_RADIUS_M = 20000
 TARGET_PRICE_LEVEL = 4  # Google's $$$$ tier, roughly €50+ per person
 FALLBACK_PRICE_LEVEL = 3  # used only if too few $$$$ options exist nearby
 MIN_RATING_PREMIUM = 4.4
@@ -298,7 +300,7 @@ def distance_matrix(origin, destinations, mode, api_key):
     return data["rows"][0]["elements"]
 
 
-def attach_distances(paired, origin, expand_radius, api_key, drive_icon="🚗", drive_label=None):
+def attach_distances(paired, origin, expand_radius, api_key, drive_icon="🚗", drive_label=None, drive_limit_seconds=DRIVE_LIMIT_SECONDS):
     if not paired:
         return []
 
@@ -314,7 +316,7 @@ def attach_distances(paired, origin, expand_radius, api_key, drive_icon="🚗", 
 
         if walk_el and walk_el.get("status") == "OK" and walk_el["duration"]["value"] <= WALK_LIMIT_SECONDS:
             travel = {"mode": "walk", "icon": "🚶", "label": None, "duration": walk_el["duration"], "distance": walk_el["distance"]}
-        elif drive_el and drive_el.get("status") == "OK" and drive_el["duration"]["value"] <= DRIVE_LIMIT_SECONDS:
+        elif drive_el and drive_el.get("status") == "OK" and drive_el["duration"]["value"] <= drive_limit_seconds:
             travel = {"mode": "drive", "icon": drive_icon, "label": drive_label, "duration": drive_el["duration"], "distance": drive_el["distance"]}
 
         results.append({"details": p["details"], "travel": travel, "score": p["candidate_score"]})
@@ -447,8 +449,8 @@ def main():
     col1, col2 = st.columns(2)
     start_date = col1.date_input("Arrival date", value=date.today(), min_value=date.today())
     end_date = col2.date_input("Departure date", value=date.today(), min_value=date.today())
+    willing_to_uber = st.checkbox("Willing to take an Uber/taxi (search up to 20 minutes away for more options)")
     has_car = st.checkbox("We have a car (search up to 50 minutes' drive away)")
-    willing_to_uber = st.checkbox("Willing to take an Uber/taxi (search up to 50 minutes away for more options)")
     submitted = st.button("Find Restaurants", type="primary", use_container_width=True)
 
     if not submitted:
@@ -463,15 +465,16 @@ def main():
 
     expand_radius = has_car or willing_to_uber
     if has_car:
-        drive_icon, drive_label = "🚗", None
+        drive_icon, drive_label, drive_limit_seconds, radius = "🚗", None, DRIVE_LIMIT_SECONDS, CAR_SEARCH_RADIUS_M
+    elif willing_to_uber:
+        drive_icon, drive_label, drive_limit_seconds, radius = "🚕", "Uber/taxi", UBER_LIMIT_SECONDS, UBER_SEARCH_RADIUS_M
     else:
-        drive_icon, drive_label = "🚕", "Uber/taxi"
+        drive_icon, drive_label, drive_limit_seconds, radius = "🚗", None, DRIVE_LIMIT_SECONDS, WALK_SEARCH_RADIUS_M
 
     with st.spinner("Researching local favourites…"):
         try:
             place = accommodation
             weekdays = collect_weekdays(start_date, end_date)
-            radius = CAR_SEARCH_RADIUS_M if expand_radius else WALK_SEARCH_RADIUS_M
 
             raw_results = nearby_search_restaurants(place["lat"], place["lng"], radius, api_key)
             filtered = filter_and_score(raw_results)
@@ -491,7 +494,7 @@ def main():
                 if details:
                     paired.append({"details": details, "candidate_score": cand["_score"]})
 
-            with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label)
+            with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label, drive_limit_seconds)
 
             final_list = [
                 r for r in with_distances
