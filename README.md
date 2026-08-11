@@ -153,6 +153,16 @@ when the restaurant supports it). This is a best-effort scan of the homepage's l
 a guarantee — some restaurant websites won't have a detectable link (e.g. reservations
 handled only by phone, or a booking widget that JavaScript loads in without a plain link).
 
+### No car? Willing to Uber
+
+Alongside **"We have a car"**, there's a second checkbox: **"Willing to take an Uber/taxi"**.
+Either one (or both) widens the search from an easy walk to anywhere up to a 50-minute
+drive away, on the assumption that a rideshare or taxi covers roughly the same ground as
+driving yourself. If you only tick the Uber option (no car), results reached that way are
+clearly labelled **🚕 (Uber/taxi)** instead of a plain car icon, so it's obvious a ride is
+needed rather than your own vehicle. Ticking both just uses the plain car label, since
+driving yourself is assumed to be the default when you have the option.
+
 ### Running it locally instead
 
 ```bash

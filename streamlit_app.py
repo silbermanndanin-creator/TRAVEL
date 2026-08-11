@@ -298,13 +298,13 @@ def distance_matrix(origin, destinations, mode, api_key):
     return data["rows"][0]["elements"]
 
 
-def attach_distances(paired, origin, has_car, api_key):
+def attach_distances(paired, origin, expand_radius, api_key, drive_icon="🚗", drive_label=None):
     if not paired:
         return []
 
     destinations = [p["details"]["geometry"]["location"] for p in paired]
     walk_elements = distance_matrix(origin, destinations, "walking", api_key)
-    drive_elements = distance_matrix(origin, destinations, "driving", api_key) if has_car else None
+    drive_elements = distance_matrix(origin, destinations, "driving", api_key) if expand_radius else None
 
     results = []
     for i, p in enumerate(paired):
@@ -313,9 +313,9 @@ def attach_distances(paired, origin, has_car, api_key):
         drive_el = drive_elements[i] if drive_elements else None
 
         if walk_el and walk_el.get("status") == "OK" and walk_el["duration"]["value"] <= WALK_LIMIT_SECONDS:
-            travel = {"mode": "walk", "duration": walk_el["duration"], "distance": walk_el["distance"]}
+            travel = {"mode": "walk", "icon": "🚶", "label": None, "duration": walk_el["duration"], "distance": walk_el["distance"]}
         elif drive_el and drive_el.get("status") == "OK" and drive_el["duration"]["value"] <= DRIVE_LIMIT_SECONDS:
-            travel = {"mode": "drive", "duration": drive_el["duration"], "distance": drive_el["distance"]}
+            travel = {"mode": "drive", "icon": drive_icon, "label": drive_label, "duration": drive_el["duration"], "distance": drive_el["distance"]}
 
         results.append({"details": p["details"], "travel": travel, "score": p["candidate_score"]})
     return results
@@ -361,8 +361,10 @@ def render_card(details, travel):
             st.caption(details.get("formatted_address", ""))
         with top_right:
             if travel:
-                icon = "🚶" if travel["mode"] == "walk" else "🚗"
-                st.markdown(f"`{icon} {travel['duration']['text']}`")
+                text = f"{travel['icon']} {travel['duration']['text']}"
+                if travel.get("label"):
+                    text += f" ({travel['label']})"
+                st.markdown(f"`{text}`")
                 st.caption(travel["distance"]["text"])
             else:
                 st.markdown("`Distance unknown`")
@@ -446,6 +448,7 @@ def main():
     start_date = col1.date_input("Arrival date", value=date.today(), min_value=date.today())
     end_date = col2.date_input("Departure date", value=date.today(), min_value=date.today())
     has_car = st.checkbox("We have a car (search up to 50 minutes' drive away)")
+    willing_to_uber = st.checkbox("Willing to take an Uber/taxi (search up to 50 minutes away for more options)")
     submitted = st.button("Find Restaurants", type="primary", use_container_width=True)
 
     if not submitted:
@@ -458,11 +461,17 @@ def main():
         st.error("Departure date can't be before arrival date.")
         return
 
+    expand_radius = has_car or willing_to_uber
+    if has_car:
+        drive_icon, drive_label = "🚗", None
+    else:
+        drive_icon, drive_label = "🚕", "Uber/taxi"
+
     with st.spinner("Researching local favourites…"):
         try:
             place = accommodation
             weekdays = collect_weekdays(start_date, end_date)
-            radius = CAR_SEARCH_RADIUS_M if has_car else WALK_SEARCH_RADIUS_M
+            radius = CAR_SEARCH_RADIUS_M if expand_radius else WALK_SEARCH_RADIUS_M
 
             raw_results = nearby_search_restaurants(place["lat"], place["lng"], radius, api_key)
             filtered = filter_and_score(raw_results)
@@ -470,7 +479,8 @@ def main():
             if not filtered:
                 st.warning(
                     "No great matches found nearby. Try widening the search by ticking "
-                    "\"we have a car\", or double-check the location."
+                    "\"we have a car\" or \"willing to take an Uber/taxi\", or double-check "
+                    "the location."
                 )
                 return
 
@@ -481,7 +491,7 @@ def main():
                 if details:
                     paired.append({"details": details, "candidate_score": cand["_score"]})
 
-            with_distances = attach_distances(paired, place, has_car, api_key)
+            with_distances = attach_distances(paired, place, expand_radius, api_key, drive_icon, drive_label)
 
             final_list = [
                 r for r in with_distances
@@ -507,7 +517,14 @@ def main():
             if website:
                 r["details"]["reservation_url"] = find_reservation_link(website)
 
-    mode_note = "walking + driving" if has_car else "walking distance"
+    if has_car and willing_to_uber:
+        mode_note = "walking + driving/Uber"
+    elif has_car:
+        mode_note = "walking + driving"
+    elif willing_to_uber:
+        mode_note = "walking + Uber/taxi"
+    else:
+        mode_note = "walking distance"
     st.caption(
         f"{len(final_list)} great option{'s' if len(final_list) != 1 else ''} near "
         f"{place['formatted_address']} ({mode_note})."
